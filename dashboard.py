@@ -8,13 +8,26 @@ import re
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Analisis Downtime Pro", layout="wide", page_icon="🏭")
 
-# CSS Kustom
+# CSS Kustom (Diperbarui untuk Layout Rapat/One Screen)
 st.markdown("""
 <style>
     .stApp { background-color: #f8f9fa; }
-    h1 { color: #2c3e50; }
+    h1 { color: #2c3e50; font-size: 2rem !important; margin-bottom: 0 !important; }
     .stDataFrame { border: 1px solid #ddd; background-color: white; }
-    div[data-testid="stMetricValue"] { font-size: 24px; color: #e74c3c; }
+    div[data-testid="stMetricValue"] { font-size: 20px; color: #e74c3c; }
+    div[data-testid="stMetricLabel"] { font-size: 14px; }
+    
+    /* --- COMPACT LAYOUT CSS --- */
+    .block-container {
+        padding-top: 1rem !important; /* Mengurangi jarak atas */
+        padding-bottom: 1rem !important;
+    }
+    
+    /* --- SEMBUNYIKAN ELEMENT STREAMLIT ASLI --- */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    .stDeployButton {display:none;}
     
     /* Styling untuk Halaman Depan */
     .landing-box {
@@ -28,11 +41,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- INITIALIZE SESSION STATE ---
-# Kita gunakan ini untuk mengatur navigasi antar halaman
 if 'current_page' not in st.session_state:
     st.session_state.current_page = 'landing'
 if 'df_main' not in st.session_state:
     st.session_state.df_main = None
+if 'selected_machine_type' not in st.session_state:
+    st.session_state.selected_machine_type = None
+# State untuk menyimpan filter agar tidak reset saat pindah halaman
+if 'saved_filter_area' not in st.session_state:
+    st.session_state.saved_filter_area = None
 
 # --- 1. FUNGSI PEMBERSIH & FORMATTER ---
 def clean_downtime_value(val):
@@ -167,17 +184,15 @@ def load_data(file_path):
 # ==========================================
 if st.session_state.current_page == 'landing':
     
-    # Layout Tengah
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
         st.markdown("<br><br>", unsafe_allow_html=True)
-        st.title("🏭 Dashboard PT Ultra Prima Abadi - Formula")
+        st.title("🏭 Dashboard Formula")
         st.markdown("### Selamat Datang")
         st.markdown("Silakan pilih sumber data untuk memulai analisis downtime.")
         st.markdown("---")
         
-        # Pilihan Input
         source_option = st.radio("Pilih Metode Input:", ["Upload File Excel", "Link Google Sheet"], horizontal=True)
         
         final_file_path = None
@@ -199,148 +214,212 @@ if st.session_state.current_page == 'landing':
                 else:
                     st.error("Link tidak valid.")
 
-        # Tombol Proses
         if final_file_path:
-            if st.button("🚀 Proses Data & Masuk Dashboard", type="primary", use_container_width=True):
+            if st.button("🚀 Proses Data", type="primary", use_container_width=True):
                 with st.spinner("Sedang memproses data..."):
                     df_loaded = load_data(final_file_path)
                     if not df_loaded.empty:
-                        # Simpan ke session state
                         st.session_state.df_main = df_loaded
+                        # Reset filter saat data baru masuk
+                        st.session_state.saved_filter_area = None
                         st.session_state.current_page = 'dashboard'
-                        st.rerun() # Refresh untuk pindah halaman
+                        st.rerun()
                     else:
                         st.error("Data kosong atau gagal dibaca.")
 
 # ==========================================
-# PAGE 2: DASHBOARD (VISUALISASI)
+# PAGE 2: DASHBOARD (VISUALISASI 1 LAYAR)
 # ==========================================
 elif st.session_state.current_page == 'dashboard':
     
-    # --- HEADER ---
-    c1, c2 = st.columns([6, 1])
+    # --- HEADER COMPACT ---
+    c1, c2 = st.columns([8, 1])
     with c1:
-        st.title("🏭 Dashboard PT Ultra Prima Abadi - Formula")
+        st.markdown("### 🏭 Dashboard PT Ultra Prima Abadi - Formula")
     with c2:
-        # Tombol Kembali / Ganti Data
-        if st.button("🔄 Ganti Data"):
+        if st.button("🔄 Reset"):
             st.session_state.df_main = None
+            st.session_state.saved_filter_area = None
             st.session_state.current_page = 'landing'
             st.cache_data.clear()
             st.rerun()
 
-    st.markdown("---")
-    
-    # Ambil data dari session state
     df = st.session_state.df_main
     
     if df is not None and not df.empty:
-        # --- SIDEBAR FILTER ---
-        st.sidebar.header("Filter Dashboard")
-        area_list = sorted(list(df['Area'].unique()))
-        selected_area = st.sidebar.multiselect("Pilih Area:", area_list, default=area_list)
         
-        # Filter Data
-        if selected_area:
-            df_main = df[df['Area'].isin(selected_area)]
-            
-            # --- TABS ---
-            tab1, tab2 = st.tabs(["📊 Dashboard", "📋 Data Detail"])
+        # --- TAB NAVIGASI ---
+        tab_dashboard, tab_detail = st.tabs(["📊 Dashboard Visual", "📋 Detail Data Tracking"])
 
-            # ==========================
-            # TAB 1: VISUALISASI
-            # ==========================
-            with tab1:
-                # A. METRICS
+        # === TAB 1: VISUALISASI RAPAT ===
+        with tab_dashboard:
+            
+            # --- LAYOUT METRICS & FILTER SEJAJAR ---
+            # c1-c3 untuk Metrics, c4 untuk Filter (Lebih lebar)
+            c_metric1, c_metric2, c_metric3, c_filter = st.columns([1, 1, 1, 2])
+            
+            # 1. FILTER AREA (Di Kolom Paling Kanan)
+            with c_filter:
+                area_list = sorted(list(df['Area'].unique()))
+                if st.session_state.saved_filter_area is None:
+                    st.session_state.saved_filter_area = area_list
+                
+                selected_area = st.pills(
+                    "Filter Area:", 
+                    options=area_list, 
+                    selection_mode="multi", 
+                    default=st.session_state.saved_filter_area,
+                    key="widget_filter_area"
+                )
+                st.session_state.saved_filter_area = selected_area
+            
+            # Terapkan Filter
+            if selected_area:
+                df_main = df[df['Area'].isin(selected_area)]
+            else:
+                df_main = df[df['Area'].isin([])] # Kosong jika tidak dipilih
+
+            # 2. METRICS (Di 3 Kolom Pertama)
+            df_agg_metrics = df_main.groupby(['Machine Type'])['Total Downtime (Menit)'].sum().reset_index()
+            df_agg_metrics = df_agg_metrics.sort_values(by='Total Downtime (Menit)', ascending=False)
+            
+            total_dt = df_main['Total Downtime (Menit)'].sum()
+            top_type = df_agg_metrics.iloc[0]['Machine Type'] if not df_agg_metrics.empty else "-"
+            
+            with c_metric1:
+                st.metric("Total Downtime", f"{total_dt:,.0f} min")
+            with c_metric2:
+                st.metric("Mesin Kritis", top_type)
+            with c_metric3:
+                st.metric("Jumlah Tipe", len(df_agg_metrics))
+            
+            st.divider()
+
+            # 3. VISUALISASI COMPACT (2 Kolom: Bar, Heatmap)
+            # Mengatur rasio kolom menjadi 1:1 agar Heatmap punya ruang yang cukup
+            row_viz = st.columns([1, 1])
+            
+            # --- KOLOM KIRI: BAR CHART (INTERAKTIF) ---
+            with row_viz[0]:
+                st.caption("📊 **Total Downtime per Tipe Mesin** (Klik batang untuk melihat detail)")
                 df_agg = df_main.groupby(['Machine Type'])['Total Downtime (Menit)'].sum().reset_index()
                 df_agg = df_agg.sort_values(by='Total Downtime (Menit)', ascending=False)
                 
-                total_dt = df_main['Total Downtime (Menit)'].sum()
-                top_type = df_agg.iloc[0]['Machine Type'] if not df_agg.empty else "-"
-                
-                col_m1, col_m2, col_m3 = st.columns(3)
-                col_m1.metric("Total Downtime Keseluruhan", f"{total_dt:,.0f} Menit")
-                col_m2.metric("Tipe Mesin Paling Kritis", top_type)
-                col_m3.metric("Jumlah Tipe Mesin", len(df_agg))
-                
-                st.markdown("---")
-
-                # B. CHARTS
-                col_bar, col_pie = st.columns([2, 1])
-                selected_machine_type = None
-
-                with col_bar:
-                    st.subheader("📊 Total Downtime per Tipe Mesin")
-                    st.caption("Klik batang untuk melihat detail history kerusakan.")
+                if not df_agg.empty:
+                    # Tinggi chart dinamis
+                    # User request: 9 bars visible. 
+                    # Assuming ~45px per bar row (including gap) -> 9 * 45 = 405px -> ~420px container
+                    dynamic_height = max(420, len(df_agg) * 45)
                     
-                    if not df_agg.empty:
-                        full_height = max(400, len(df_agg) * 30)
-                        with st.container(height=500):
-                            fig_bar = px.bar(
-                                df_agg, 
-                                x='Total Downtime (Menit)', 
-                                y='Machine Type', 
-                                orientation='h', 
-                                text_auto='.0f'
-                            )
-                            fig_bar.update_layout(
-                                yaxis={'categoryorder':'total ascending'}, 
-                                height=full_height, 
-                                margin=dict(l=0, r=0, t=10, b=0),
-                                clickmode='event+select'
-                            )
-                            selection = st.plotly_chart(fig_bar, use_container_width=True, on_select="rerun", selection_mode="points")
-                            
-                            if selection and len(selection.selection['points']) > 0:
-                                selected_machine_type = selection.selection['points'][0]['y']
+                    # Container scrollable set to 420 to show approx 9 bars
+                    with st.container(height=420):
+                        fig_bar = px.bar(
+                            df_agg, 
+                            x='Total Downtime (Menit)', 
+                            y='Machine Type', 
+                            orientation='h', 
+                            text_auto='.0f'
+                        )
+                        fig_bar.update_layout(
+                            yaxis={'categoryorder':'total ascending'}, 
+                            height=dynamic_height, 
+                            margin=dict(l=0, r=0, t=0, b=0),
+                            clickmode='event+select'
+                        )
+                        # ON SELECT -> PINDAH KE PAGE 3
+                        selection = st.plotly_chart(fig_bar, use_container_width=True, on_select="rerun", selection_mode="points")
+                        
+                        if selection and len(selection.selection['points']) > 0:
+                            selected_machine = selection.selection['points'][0]['y']
+                            st.session_state.selected_machine_type = selected_machine
+                            st.session_state.current_page = 'detail_page' # Pindah Page
+                            st.rerun()
 
-                with col_pie:
-                    st.subheader("🕒 Total Downtime per Shift")
-                    if 'Shift' in df_main.columns:
-                        df_shift = df_main.groupby('Shift')['Total Downtime (Menit)'].sum().reset_index()
-                        fig_pie = px.pie(df_shift, values='Total Downtime (Menit)', names='Shift', hole=0.4, color_discrete_sequence=px.colors.sequential.RdBu)
-                        st.plotly_chart(fig_pie, use_container_width=True)
-
-                # --- DRILL-DOWN ---
-                if selected_machine_type:
-                    st.divider()
-                    st.markdown(f"### 🔎 Detail Kerusakan: **{selected_machine_type}**")
-                    
-                    df_detail = df_main[df_main['Machine Type'] == selected_machine_type].copy()
-                    df_detail = df_detail.sort_values(by='Total Downtime (Menit)', ascending=False)
-                    
-                    cols_to_show = {
-                        'Tanggal': 'Start Date', 'Stop Date': 'Stop Date', 'Jam': 'Start Downtime',
-                        'Start Repair': 'Start Repair', 'Stop Repair': 'Stop Repair',
-                        'Start Production': 'Start Production', 'Level 3': 'Level 3',
-                        'Tindakan': 'Tindakan', 'Respon Time': 'Respon Time',
-                        'Technical Downtime': 'Tech Downtime', 'Total Downtime (Menit)': 'Total Downtime'
-                    }
-                    available_cols = [c for c in cols_to_show.keys() if c in df_detail.columns]
-                    df_show = df_detail[available_cols].rename(columns=cols_to_show)
-                    
-                    st.dataframe(df_show, use_container_width=True, hide_index=True, column_config={"Total Downtime": st.column_config.NumberColumn(format="%d min")})
-                else:
-                    st.info("👆 Klik batang pada grafik 'Total Downtime per Tipe Mesin' di atas untuk melihat rincian kerusakan.")
-
-                # C. HEATMAP
-                st.markdown("---")
-                st.subheader("🔥 Heatmap: Tipe Mesin vs Shift")
+            # --- KOLOM KANAN: HEATMAP (PENGGANTI PIE CHART) ---
+            with row_viz[1]:
+                st.caption("🔥 **Tipe Mesin vs Shift**")
                 if 'Shift' in df_main.columns:
                     df_pivot = df_main.pivot_table(index='Machine Type', columns='Shift', values='Total Downtime (Menit)', aggfunc='sum', fill_value=0)
                     df_pivot['Total'] = df_pivot.sum(axis=1)
-                    df_pivot = df_pivot.sort_values('Total', ascending=False).drop(columns='Total').head(20)
-                    fig_heat = px.imshow(df_pivot, text_auto=True, aspect="auto", color_continuous_scale="Reds", title="Sebaran Downtime per Shift")
+                    # Ambil Top 15 agar muat di height 420px dan terlihat rapi
+                    df_pivot = df_pivot.sort_values('Total', ascending=False).drop(columns='Total').head(15) 
+                    
+                    fig_heat = px.imshow(df_pivot, text_auto=True, aspect="auto", color_continuous_scale="Reds")
+                    # Set height agar sejajar dengan container sebelah (420px)
+                    fig_heat.update_layout(height=420, margin=dict(l=0, r=0, t=0, b=0)) 
                     st.plotly_chart(fig_heat, use_container_width=True)
 
-            # ==========================
-            # TAB 2: DATA DETAIL
-            # ==========================
-            with tab2:
-                df_sorted = df_main.sort_values(by='Total Downtime (Menit)', ascending=False).reset_index(drop=True)
-                st.dataframe(df_sorted, use_container_width=True, height=800)
-                csv = df_sorted.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Download Full CSV", csv, "analisis_lkm.csv", "text/csv")
+        # === TAB 2: TABEL DATA LENGKAP ===
+        with tab_detail:
+            st.subheader("📋 Detail Data Tracking (Keseluruhan)")
+            df_sorted = df_main.sort_values(by='Total Downtime (Menit)', ascending=False).reset_index(drop=True)
+            # Menyesuaikan tinggi untuk menampilkan sekitar 14 data (~530px)
+            st.dataframe(df_sorted, use_container_width=True, height=530)
+            csv = df_sorted.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Download CSV", csv, "analisis_lkm.csv", "text/csv")
+
+# ==========================================
+# PAGE 3: DETAIL PAGE (DRILL DOWN)
+# ==========================================
+elif st.session_state.current_page == 'detail_page':
+    
+    # Tombol Kembali
+    if st.button("⬅️ Kembali ke Dashboard"):
+        st.session_state.current_page = 'dashboard'
+        st.session_state.selected_machine_type = None
+        st.rerun()
         
-        else:
-            st.info("Pilih Area di sidebar untuk menampilkan data.")
+    target_machine = st.session_state.selected_machine_type
+    df = st.session_state.df_main
+    
+    st.markdown(f"### 🔎 Analisis Detail: **{target_machine}**")
+    
+    if df is not None:
+        # Filter data hanya untuk mesin yang diklik
+        df_detail = df[df['Machine Type'] == target_machine].copy()
+        df_detail = df_detail.sort_values(by='Total Downtime (Menit)', ascending=False)
+        
+        # --- METRICS DETAIL PER TIPE MESIN ---
+        # Menghitung Total untuk tipe mesin yang dipilih
+        tot_downtime = df_detail['Total Downtime (Menit)'].sum() if 'Total Downtime (Menit)' in df_detail.columns else 0
+        tot_respon = df_detail['Respon Time'].sum() if 'Respon Time' in df_detail.columns else 0
+        tot_tech = df_detail['Technical Downtime'].sum() if 'Technical Downtime' in df_detail.columns else 0
+        
+        # Tampilkan Metrics
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Downtime", f"{tot_downtime:,.0f} min")
+        col2.metric("Total Respon Time", f"{tot_respon:,.0f} min")
+        col3.metric("Total Tech Downtime", f"{tot_tech:,.0f} min")
+        
+        st.divider()
+
+        # Mapping kolom agar user friendly
+        cols_to_show = {
+            'Tanggal': 'Start Date', 
+            'Stop Date': 'Stop Date', 
+            'Jam': 'Start Downtime',
+            'Start Repair': 'Start Repair', 
+            'Stop Repair': 'Stop Repair',
+            'Start Production': 'Start Production', 
+            'Level 3': 'Level 3',
+            'Tindakan': 'Tindakan', 
+            'Respon Time': 'Respon Time',
+            'Technical Downtime': 'Tech Downtime', 
+            'Total Downtime (Menit)': 'Total Downtime'
+        }
+        
+        available_cols = [c for c in cols_to_show.keys() if c in df_detail.columns]
+        df_show = df_detail[available_cols].rename(columns=cols_to_show)
+        
+        # Tampilkan Tabel Detail (Disetel ~500px untuk 13 Data)
+        st.dataframe(
+            df_show, 
+            use_container_width=True, 
+            hide_index=True, 
+            height=500, # Tinggi disesuaikan untuk menampilkan ~13 baris saja
+            column_config={
+                "Total Downtime": st.column_config.NumberColumn(format="%d min"),
+                "Tech Downtime": st.column_config.NumberColumn(format="%d min"),
+                "Respon Time": st.column_config.NumberColumn(format="%d min"),
+            }
+        )
